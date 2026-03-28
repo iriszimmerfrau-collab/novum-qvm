@@ -132,7 +132,5 @@ Thumbs.db
 # Project-specific
 *.pkl
 *.pickle
-*.puffin_model
-quantum_dual_dataset_model.pkl
-puffin_model.pkl
+PKG-INFO
 .replit
