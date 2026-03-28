@@ -1,8 +1,8 @@
 include README.md
 include LICENSE
-include MANIFEST.in
 include pyproject.toml
 include setup.py
+include setup.cfg
 recursive-include novum_qvm *.py
 recursive-include tests *.py
 recursive-exclude * __pycache__

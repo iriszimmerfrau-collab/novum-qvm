@@ -3,6 +3,10 @@ import random
 import math
 import time
 import hashlib
+from typing import Callable, List
+
+from .QuantumComputer import PFQVS_QuantumComputer
+
 
 # Perlin noise implementation
 def fade(t):
@@ -18,7 +22,6 @@ def grad(hash, x, y, z):
     return (u if (h & 1) == 0 else -u) + (v if (h & 2) == 0 else -v)
 
 def perlin_noise(x, y, z, seed=0):
-    # Permutation table
     p = [i for i in range(256)]
     random.seed(seed)
     random.shuffle(p)
@@ -53,8 +56,6 @@ def perlin_noise(x, y, z, seed=0):
                           grad(p[BB + 1], x - 1, y - 1, z - 1))))
 
 def get_environmental_seed():
-    # Use time, and perhaps some 'environmental' factors
-    # For simplicity, use current time and some hash
     t = time.time()
     seed_str = f"{t}"
     seed = int(hashlib.md5(seed_str.encode()).hexdigest(), 16) % (2**32)
@@ -65,137 +66,123 @@ def perlin(x, y, z, seed=None):
         seed = get_environmental_seed()
     return perlin_noise(x, y, z, seed)
 
-def train_qnn(features, labels, num_layers=2, num_steps=100, stepsize=0.1):
-    # Define a quantum circuit
-    dev = qml.device("default.qubit", wires=2)
 
-    @qml.qnode(dev)
-    def circuit(weights, x):
-        qml.templates.AngleEmbedding(x, wires=[0, 1])
-        qml.templates.BasicEntanglerLayers(weights, wires=[0, 1])
-        return qml.expval(qml.PauliZ(0))
+def _apply_ry(qc: PFQVS_QuantumComputer, theta: float, target: int):
+    """Apply RY(theta) rotation to target qubit in-place using state vector pairs."""
+    flat = qc._get_flat_state().copy()
+    cos_t = math.cos(theta / 2.0)
+    sin_t = math.sin(theta / 2.0)
+    step = 1 << (qc.n_qubits - 1 - target)
+    for i in range(qc.N):
+        if ((i >> (qc.n_qubits - 1 - target)) & 1) == 0:
+            j = i | step
+            a, b = flat[i], flat[j]
+            flat[i] = cos_t * a - sin_t * b
+            flat[j] = sin_t * a + cos_t * b
+    qc._set_flat_state(flat)
 
-    # Define the quantum neural network (QNN) model
-    def qnn_classifier(weights, x):
-        return circuit(weights, x)
 
-    # Define the cost function
-    def cost_fn(weights, features, labels):
-        predictions = [qnn_classifier(weights, x) for x in features]
-        return np.mean((predictions - labels) ** 2)
+def _qnn_circuit(weights: np.ndarray, x: np.ndarray, n_qubits: int = 2, num_layers: int = 2) -> float:
+    """Variational QNN circuit: angle embedding + entangling layers. Returns <Z0>."""
+    qc = PFQVS_QuantumComputer(n_qubits=n_qubits)
+    psi = np.zeros(qc.N, dtype=complex)
+    psi[0] = 1.0
+    qc._set_flat_state(psi)
 
-    # Initialize the QNN weights
-    num_weights = 2 * num_layers
-    weights = np.random.random(size=(num_steps, num_weights))
+    # Angle embedding: RY(x[i]) on qubit i
+    for i in range(min(n_qubits, len(x))):
+        _apply_ry(qc, float(x[i]), i)
 
-    # Train the QNN       
-    opt = qml.GradientDescentOptimizer(stepsize=stepsize)
+    # Variational layers: per-qubit RY rotations + CNOT chain entanglement
+    w_idx = 0
+    for _ in range(num_layers):
+        for q in range(n_qubits):
+            _apply_ry(qc, float(weights[w_idx]), q)
+            w_idx += 1
+        for q in range(n_qubits - 1):
+            qc.apply_gate('CNOT', q, q + 1)
 
-    for i in range(num_steps):
-        weights[i] = opt.step(lambda w: cost_fn(w, features, labels), weights[i])
+    # <Z0>: sum over basis states, +1 if qubit 0 is |0>, -1 if qubit 0 is |1>
+    flat = qc._get_flat_state()
+    probs = np.abs(flat) ** 2
+    exp_z0 = float(np.sum(
+        probs[idx] * (1.0 - 2.0 * ((idx >> (n_qubits - 1)) & 1))
+        for idx in range(qc.N)
+    ))
+    return exp_z0
 
-    return weights[-1]
 
-def test_qnn(weights, test_data):
-    # Define a quantum circuit
-    dev = qml.device("default.qubit", wires=2)
+def train_qnn(features, labels, num_layers: int = 2, num_steps: int = 100, stepsize: float = 0.1) -> np.ndarray:
+    """Train variational QNN via parameter shift rule gradient descent. Returns weights."""
+    features = np.asarray(features, dtype=float)
+    labels = np.asarray(labels, dtype=float)
+    n_qubits = 2
+    n_weights = n_qubits * num_layers
+    weights = np.random.uniform(0.0, 2.0 * math.pi, size=n_weights)
+    shift = math.pi / 2.0
 
-    @qml.qnode(dev)
-    def circuit(weights, x):
-        qml.templates.AngleEmbedding(x, wires=[0, 1])
-        qml.templates.BasicEntanglerLayers(weights, wires=[0, 1])
-        return qml.expval(qml.PauliZ(0))
+    for _ in range(num_steps):
+        grad = np.zeros_like(weights)
+        for x, y in zip(features, labels):
+            pred = _qnn_circuit(weights, x, n_qubits, num_layers)
+            residual = pred - float(y)
+            for i in range(n_weights):
+                w_plus = weights.copy(); w_plus[i] += shift
+                w_minus = weights.copy(); w_minus[i] -= shift
+                grad[i] += residual * (
+                    _qnn_circuit(w_plus, x, n_qubits, num_layers) -
+                    _qnn_circuit(w_minus, x, n_qubits, num_layers)
+                ) / 2.0
+        weights -= stepsize * grad / max(1, len(features))
 
-    # Define the quantum neural network (QNN) model
-    def qnn_classifier(weights, x):
-        return circuit(weights, x)
+    return weights
 
-    # Test the QNN
-    predictions = [qnn_classifier(weights, x) for x in test_data]
-    return predictions
 
-def deutsch(f):
-    # Initialize the quantum computer with 1 qubit
-    qc = QuantumCircuit(1, 1)
+def test_qnn(weights: np.ndarray, test_data) -> List[float]:
+    """Evaluate trained QNN on test_data. Returns list of <Z0> predictions."""
+    weights = np.asarray(weights, dtype=float)
+    n_qubits = 2
+    num_layers = len(weights) // n_qubits
+    return [_qnn_circuit(weights, np.asarray(x, dtype=float), n_qubits, num_layers)
+            for x in test_data]
 
-    # Apply the oracle gate
-    if f(0):
-        qc.x(0)
 
-    # Apply Hadamard gate
-    qc.h(0)
+def deutsch(f: Callable[[int], int]) -> str:
+    """Determine if f: {0,1} -> {0,1} is constant or balanced via Deutsch-Jozsa."""
+    qc = PFQVS_QuantumComputer(n_qubits=1)
+    counts = qc.deutsch_jozsa(f)
+    return "Constant" if counts.get('0', 0) >= counts.get('1', 0) else "Balanced"
 
-    # Measure qubit and print result
-    qc.measure(0, 0)
-
-    # Simulate the circuit using the Aer simulator
-    simulator = Aer.get_backend('qasm_simulator')
-    job = simulator.run(assemble(qc, shots=1))
-
-    # Get the result of the simulation
-    result = job.result()
-    counts = result.get_counts()
-
-    # Determine whether f is constant or balanced
-    if '0' in counts:
-        return "Constant"
-    else:
-        return "Balanced"
 
 def custom_quantum_machine_learning(X_train, Y_train, X_test, Y_test, num_qubits, num_layers, num_steps):
-    # Standardize the features
-    scaler = StandardScaler()
-    X_train = scaler.fit_transform(X_train)
-    X_test = scaler.transform(X_test)
+    """Train and evaluate a QNN classifier with feature standardization."""
+    X_train = np.asarray(X_train, dtype=float)
+    X_test = np.asarray(X_test, dtype=float)
+    Y_train = np.asarray(Y_train, dtype=float)
 
-    # Train the quantum model
-    params = train(X_train, Y_train, num_qubits, num_layers, num_steps)
+    mean = X_train.mean(axis=0)
+    std = X_train.std(axis=0)
+    std[std == 0.0] = 1.0
+    X_train = (X_train - mean) / std
+    X_test = (X_test - mean) / std
 
-    # Test the quantum model
-    accuracy = test(X_test, Y_test, params, num_qubits)
-    return accuracy
+    weights = train_qnn(X_train, Y_train, num_layers, num_steps)
+    return test_qnn(weights, X_test)
+
+
 def find_substring(string, substring):
-    if substring in string:
-        return True
-    else:
-        return False
-def grover_search(secret_bitstring, shots=10000, qubits=128):
-  qr = QuantumRegister(qubits, name='q')
-  cr = ClassicalRegister(qubits, name='c')
-  circuit = QuantumCircuit(qr, cr)
+    return substring in string
 
-  # Apply Hadamard gate on all qubits
-  circuit.h(qr)
-  print("Step 1: Apply Hadamard gates to all qubits")
 
-  # Build the black-box oracle
-  for idx, bit in enumerate(reversed(secret_bitstring)):
-    if bit == '1':
-      circuit.z(qr[idx])
-  print("Step 2: Apply the black-box oracle")
-
-  # Apply Hadamard gate on all qubits again
-  circuit.h(qr)
-  print("Step 3: Apply Hadamard gates to all qubits")
-
-  # Measure all qubits
-  circuit.measure(qr, cr)
-  print("Step 4: Measurement")
-
-  # Run the circuit on a simulator and increase the number of shots
-  simulator = Aer.get_backend('qasm_simulator')
-  result = execute(circuit, backend=simulator, shots=shots).result()
-  counts = result.get_counts(circuit)
-  print(str(counts))
-  # Find the most frequent bitstring
-  max_count = 0
-  found_bitstring = ''
-  for bitstring, count in counts.items():
-    if count > max_count:
-      max_count = count
-      found_bitstring = bitstring
-  if (found_bitstring, secret_bitstring):
-    found_bitstring = secret_bitstring
-    return found_bitstring
-  else:
-    return 'ERROR. Cannot Compute. Try Increasing The Qubits, And Shots. grover_search(secret_bitstring, shots, qubits) If the error persists, contact the dev.'
+def grover_search(secret_bitstring: str, shots: int = 10000, qubits: int = 128) -> str:
+    """Search for secret_bitstring using Grover's algorithm via PFQVS_QuantumComputer."""
+    qc = PFQVS_QuantumComputer(n_qubits=qubits)
+    counts = qc.grovers_search(secret_bitstring, shots=shots)
+    found = max(counts, key=counts.get)
+    if found == secret_bitstring:
+        return found
+    return (
+        'ERROR. Cannot Compute. Try Increasing The Qubits, And Shots. '
+        'grover_search(secret_bitstring, shots, qubits) '
+        'If the error persists, contact the dev.'
+    )

@@ -1,14 +1,14 @@
 [build-system]
-requires = ["setuptools>=45", "wheel", "setuptools_scm[toml]>=6.2"]
+requires = ["setuptools>=61", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "novum-qvm"
-version = "1.1.0"
+version = "1.2.0"
 description = "Perlin-Fourier Quantum Virtual Simulation (PFQVS): Advanced quantum circuit simulator with QNLP support"
 readme = "README.md"
 requires-python = ">=3.8"
-license = {text = "MIT"}
+license = {file = "LICENSE"}
 authors = [
     {name = "Amin Alogaili", email = "aminalogai@aol.com"}
 ]
@@ -17,11 +17,14 @@ classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
     "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.8",
     "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
     "Topic :: Scientific/Engineering :: Physics",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
@@ -31,18 +34,14 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-qnlp = ["datasets>=2.0.0"]
 dev = ["pytest>=6.0", "pytest-cov>=2.12", "black>=21.0", "flake8>=3.9", "build", "twine"]
-ml = ["torch>=1.9.0", "tensorflow>=2.6.0", "PennyLane>=0.25.0"]
 
 [project.urls]
-Homepage = "https://github.com/yourusername/novum-qvm"
-Documentation = "https://github.com/yourusername/novum-qvm/wiki"
-Repository = "https://github.com/yourusername/novum-qvm.git"
-Issues = "https://github.com/yourusername/novum-qvm/issues"
+Homepage = "https://github.com/iriszimmerfrau-collab/novum-qvm"
+Documentation = "https://github.com/iriszimmerfrau-collab/novum-qvm/wiki"
+Repository = "https://github.com/iriszimmerfrau-collab/novum-qvm.git"
+Issues = "https://github.com/iriszimmerfrau-collab/novum-qvm/issues"
 
-[tool.setuptools]
-packages = ["novum_qvm"]
-
-[tool.setuptools.package-data]
-novum_qvm = ["py.typed"]
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["novum_qvm*"]
