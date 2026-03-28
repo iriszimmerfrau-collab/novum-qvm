@@ -1,305 +1,435 @@
-# Novum-QVM: Perlin-Fourier Quantum Virtual Simulation
+# Novum-QVM
 
-[![License](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
-[![Python](https://img.shields.io/badge/Python-3.10+-blue.svg)](https://www.python.org/)
+[![PyPI version](https://badge.fury.io/py/novum-qvm.svg)](https://badge.fury.io/py/novum-qvm)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
+[![Python](https://img.shields.io/badge/Python-3.8%2B-blue.svg)](https://www.python.org/)
+[![Tests](https://github.com/iriszimmerfrau-collab/novum-qvm/actions/workflows/publish.yml/badge.svg)](https://github.com/iriszimmerfrau-collab/novum-qvm/actions/workflows/publish.yml)
 
-Novum-QVM is an advanced quantum circuit simulator implementing **Perlin-Fourier Quantum Virtual Simulation (PFQVS)**, a novel approach that leverages Perlin noise for structured state initialization and Fourier analysis for optimized gate execution. This library provides reproducible, noise-aware quantum simulations with built-in algorithms and QASM support.
+**Novum-QVM** is a pure-Python quantum circuit simulator built on **Perlin-Fourier Quantum Virtual Simulation (PFQVS)** — a simulation architecture that uses Perlin noise for structured state initialization, O(N) Fourier-domain gate execution, spectral decoherence modeling, and importance-sampled measurement. It requires only NumPy and ships with Grover's search, Deutsch-Jozsa, a QASM parser, a variational QNN trainer, and a full QNLP stack.
+
+---
 
 ## Table of Contents
 
-- [Features](#features)
 - [Installation](#installation)
 - [Quick Start](#quick-start)
 - [PFQVS Architecture](#pfqvs-architecture)
-- [API Reference](#api-reference)
+  - [Layer 1 — Perlin State Initialization](#layer-1--perlin-state-initialization)
+  - [Layer 2 — O(N) Fourier-Domain Gate Execution](#layer-2--on-fourier-domain-gate-execution)
+  - [Layer 3 — Spectral Decoherence Modeling](#layer-3--spectral-decoherence-modeling)
+  - [Layer 4 — Importance-Sampled Measurement](#layer-4--importance-sampled-measurement)
 - [Algorithms](#algorithms)
-- [Evaluation Suite](#evaluation-suite)
+  - [Grover's Search](#grovers-search)
+  - [Deutsch-Jozsa](#deutsch-jozsa)
+  - [Variational QNN](#variational-qnn)
+- [QNLP](#qnlp)
+- [API Reference](#api-reference)
 - [Contributing](#contributing)
 - [License](#license)
 
-## Features
-
-- **Perlin Noise Initialization**: Reproducible quantum states with smooth amplitude correlations
-- **Fourier-Domain Gate Execution**: Optimized entangling gate application using FFT
-- **Spectral Decoherence Modeling**: Physically-inspired noise with octave-mapped Perlin spectra
-- **Importance Sampling Measurement**: Variance-reduced sampling for NISQ algorithms
-- **Built-in Algorithms**: Grover's Search, Deutsch-Jozsa, Quantum Fourier Transform
-- **QASM Support**: Parse and execute quantum assembly code
-- **Quantum Natural Language Processing (QNLP)**: String encoding, word embeddings, attention, parsing, and language generation
-- **Comprehensive Testing**: Full evaluation suite with benchmarks
+---
 
 ## Installation
 
 ```bash
-# Clone the repository
-git clone https://github.com/yourusername/novum-qvm.git
-cd novum-qvm
-
-# Install dependencies
-pip install -r requirements.txt
-
-# Or using poetry
-poetry install
+pip install novum-qvm
 ```
 
-### Dependencies
+**From source:**
 
-- numpy >= 1.22.2
-- matplotlib >= 3.5.2
-- PennyLane >= 0.31.0
-- jax >= 0.3.13
-- tensorflow == 2.9.3
-- torch == 1.13.1
+```bash
+git clone https://github.com/iriszimmerfrau-collab/novum-qvm.git
+cd novum-qvm
+pip install -e .[dev]
+pytest tests/
+```
+
+**Only dependency:** `numpy >= 1.22.0`
+
+---
 
 ## Quick Start
 
 ```python
-from novum_qvm.QuantumComputer import PFQVS_QuantumComputer
+from novum_qvm import PFQVS_QuantumComputer
 
-# Create a 2-qubit PFQVS simulator
-qc = PFQVS_QuantumComputer(2)
+# 2-qubit simulator — state initialized with Perlin noise
+qc = PFQVS_QuantumComputer(n_qubits=2)
 
-# Apply quantum gates
-qc.apply_gate('H', 0)      # Hadamard on qubit 0
-qc.apply_gate('CNOT', 0, 1) # CNOT with control 0, target 1
+# Apply gates
+qc.apply_gate('H', 0)        # Hadamard on qubit 0
+qc.apply_gate('CNOT', 0, 1)  # CNOT, control=0, target=1
 
-# Measure with importance sampling
-counts = qc.measure_importance_sampling(1000)
-print("Measurement results:", counts)
+# Measure (importance-sampled)
+counts = qc.measure(shots=1000)
+print(counts)  # {'00': ~480, '11': ~520}
 
-# Built-in algorithms
-grover_counts = qc.grovers_search('11')  # Search for |11⟩
-print("Grover's result:", grover_counts)
+# Grover's search over 3 qubits
+qc3 = PFQVS_QuantumComputer(n_qubits=3)
+result = qc3.grovers_search('101', shots=2000)
+print(result)  # '101' dominates
+
+# Deutsch-Jozsa
+qc1 = PFQVS_QuantumComputer(n_qubits=2)
+counts = qc1.deutsch_jozsa(lambda x: 0)   # constant → measures '00'
+counts = qc1.deutsch_jozsa(lambda x: x&1) # balanced → '00' suppressed
+
+# QASM
+qc.parse_qasm("h q[0]; cx q[0], q[1];", shots=500)
 ```
+
+---
 
 ## PFQVS Architecture
 
-### Core Insight
+Classical quantum simulators store an n-qubit state as a vector of 2ⁿ complex amplitudes and apply gates as dense matrix multiplications — O(N²) per gate, N = 2ⁿ. PFQVS reorganizes this across four layers to reduce cost, add structured noise, and improve sampling efficiency.
 
-Quantum mechanics fundamentally relies on Fourier theory. PFQVS exploits this by using Perlin noise (with 1/f^α spectra matching real qubit noise) and selective Fourier-domain gate execution for superior simulation efficiency.
+---
 
-### Layer 1: Perlin State Initialization
+### Layer 1 — Perlin State Initialization
 
-Instead of random initialization, states are seeded with Perlin noise:
+Standard simulators start from |0…0⟩. PFQVS instead seeds the state with **3D Perlin noise**, giving smooth, correlated amplitudes that better represent a real qubit's thermal or environmental starting state.
 
-```python
-ψᵢ = P(i, 0, t) + i·P(i, 1, t)     for i = 0 ... 2ⁿ − 1
-ψ ← ψ / ‖ψ‖
-```
+**Perlin noise construction:**
 
-This provides smooth, correlated amplitudes that mimic real quantum evolution.
-
-### Layer 2: Fourier Domain Gate Execution
-
-Entangling gates leverage the convolution theorem:
+For each basis index *i* ∈ {0, …, N−1}, fractional coordinates are computed as:
 
 ```
-Standard:   ψ' = U · ψ          (O(N²))
-PFQVS:      Ψ̂ = FFT(ψ)
-            Ψ̂' = G_f ⊙ Ψ̂       (O(N))
-            ψ' = IFFT(Ψ̂')
+x = i / N,   seed offset z = seed × 0.001
 ```
 
-### Layer 3: Spectral Decoherence Modeling
+The amplitude is:
 
-Octave-mapped Perlin noise models physical decoherence:
-
-| Octave | Physical Analog |
-|--------|-----------------|
-| 1 | 1/f charge noise |
-| 2–3 | Thermal fluctuations |
-| 4–6 | EMI interference |
-
-### Layer 4: Measurement via Spectral Importance Sampling
-
-FFT analysis of probability distributions enables variance-reduced sampling for algorithms like VQE and QAOA.
-
-## Quantum Natural Language Processing (QNLP)
-
-Novum-QVM includes QNLP capabilities based on PFQVS, enabling quantum-enhanced language processing:
-
-### Quantum String Encoding
-Encode text strings into quantum states for exponential representation:
-```python
-from novum_qvm import QuantumStringEncoder
-
-encoder = QuantumStringEncoder()
-qc = encoder.encode_string("Hello, quantum world!")
+```
+ψᵢ = P(x, 0.1, z) + i·P((x + 0.5) mod 1, 0.2, z)
 ```
 
-### Quantum Word Embeddings
-Generate quantum embeddings for words with built-in similarity:
-```python
-from novum_qvm import QuantumWordEmbeddings
+where *P(x, y, z)* is 3D Perlin noise built from a seeded permutation table, trilinear interpolation, and quintic smoothstep blending *f(t) = 6t⁵ − 15t⁴ + 10t³*. The state is normalized:
 
-embeddings = QuantumWordEmbeddings()
-emb1 = embeddings.get_embedding("quantum")
-emb2 = embeddings.get_embedding("classical")
-similarity = embeddings.similarity("quantum", "classical")
+```
+ψ ← ψ / ‖ψ‖₂
 ```
 
-### Quantum Attention Mechanisms
-Apply quantum self-attention to sequences:
-```python
-from novum_qvm import QuantumAttention
+**Why Perlin over random?** Perlin noise has a 1/f^α power spectrum — the same spectral shape found in charge noise and flux noise in real superconducting qubits. Starting from a Perlin state rather than |0⟩ gives the simulator a physically plausible initial condition and makes subsequent decoherence modeling consistent with the initialization basis.
 
-attention = QuantumAttention(n_qubits=2)
-attended_state = attention.attention_layer([emb1, emb2])
+---
+
+### Layer 2 — O(N) Fourier-Domain Gate Execution
+
+**Single-qubit gates** (H, X, Y, Z) are applied in O(N) time without forming the full 2ⁿ × 2ⁿ Kronecker product. For a target qubit *t*, any basis index *i* can be paired with the index *j = i XOR (1 << (n−1−t))* that differs only in bit *t*. The 2×2 gate matrix is applied to each such pair:
+
+```
+For all i where bit t of i is 0:
+    j = i | (1 << (n−1−t))
+    [ψᵢ', ψⱼ']ᵀ = M · [ψᵢ, ψⱼ]ᵀ
 ```
 
-### Quantum Syntactic Parsing
-Parse sentences using quantum circuits:
-```python
-from novum_qvm import QuantumSyntacticParser
+This processes each pair exactly once, giving O(N/2) = O(N) operations versus the naive O(N²) full matrix-vector product.
 
-parser = QuantumSyntacticParser()
-parse_result = parser.parse_sentence("The cat sat on the mat.")
+**Gate matrices:**
+
+```
+H = (1/√2) [[1,  1],    X = [[0, 1],    Y = [[0, -i],    Z = [[1,  0],
+             [1, -1]]        [1, 0]]         [i,  0]]         [0, -1]]
 ```
 
-### Quantum Language Generation
-Generate text with quantum models:
-```python
-from novum_qvm import QuantumLanguageModel
+**CNOT** is applied as a computational-basis permutation. For each basis index *i*, if the control bit is 1 the target bit is flipped:
 
-model = QuantumLanguageModel()
-generated = model.generate_text("The quantum", max_length=10)
+```
+CNOT|ctrl, tgt⟩ = |ctrl, tgt ⊕ ctrl⟩
 ```
 
-## API Reference
+implemented as a scatter: `new_state[permute(i)] = state[i]` for all i.
 
-### PFQVS_QuantumComputer
+---
 
-#### Initialization
-```python
-qc = PFQVS_QuantumComputer(n_qubits, seed=None)
+### Layer 3 — Spectral Decoherence Modeling
+
+Physical qubits lose coherence due to overlapping noise sources at different frequencies. PFQVS models this with **octave-weighted Perlin noise** — each octave maps to a distinct physical channel:
+
+| Octave | Frequency Scale | Physical Analog |
+|--------|----------------|-----------------|
+| 1 | Low | 1/f charge noise |
+| 2–3 | Mid | Thermal fluctuations |
+| 4–6 | High | EMI / control crosstalk |
+
+For each amplitude ψᵢ, a damping coefficient is computed:
+
+```
+env(i) = Σ_{o=1}^{O}  (1/2ᵒ) · P(x·2ᵒ, 0.1·o, seed·0.001 + t·0.01)
+
+damping(i) = exp(−|env(i)| · dt)
+
+ψᵢ ← ψᵢ · damping(i)
 ```
 
-#### Gate Application
-```python
-qc.apply_gate(gate_name, qubit_idx, control_idx=None)
-# Supported gates: 'H', 'X', 'Y', 'Z', 'S', 'T', 'CNOT', 'CZ'
+The `self.t` counter tracks circuit depth so the noise pattern evolves coherently as the circuit deepens. Call `apply_decoherence(dt, octaves)` manually after gate sequences where noise matters.
+
+---
+
+### Layer 4 — Importance-Sampled Measurement
+
+Naive sampling draws from the raw probability distribution **p** directly. For peaked distributions (e.g. after Grover's), this is fine, but for flat distributions it wastes shots on low-probability outcomes.
+
+PFQVS blends **p** with a spectral importance mask **m** derived from the leading Fourier components of **p**:
+
+```
+spectrum = FFT(p)
+keep top k = max(1, ⌊|spectrum| · f⌋) components by magnitude
+m = IFFT(filtered_spectrum),  m ← max(m − min(m), 0),  m ← m / ‖m‖₁
+
+Q = p + α·m,   Q ← Q / ‖Q‖₁
+
+samples ~ Multinomial(shots, Q)
 ```
 
-#### Algorithms
-```python
-# Grover's Search
-counts = qc.grovers_search(marked_state)
+Default parameters: α = 0.5, spectral_fraction = 0.1. The blending ensures that low-probability, high-spectral-weight basis states still receive some sample coverage — useful for variational algorithms (VQE, QAOA) where gradient estimation requires broad support.
 
-# Deutsch-Jozsa
-counts = qc.deutsch_jozsa(f_function)
-
-# QFT
-qc.qft(qubit_list)
-```
-
-#### QASM Support
-```python
-counts = qc.parse_qasm(qasm_string)
-```
-
-#### Measurement
-```python
-counts = qc.measure_importance_sampling(shots)
-spectrum = qc.get_decoherence_spectrum()
-```
+---
 
 ## Algorithms
 
 ### Grover's Search
-Quadratic speedup for unstructured search:
+
+Grover's algorithm finds a marked element in an unsorted database of N items in O(√N) oracle calls versus O(N) classically.
+
+**Circuit:**
+
+1. Initialize uniform superposition: `ψ = (1/√N) Σ|x⟩`
+2. Repeat *k* times:
+   - **Oracle** — flip phase of target: `ψ[target] *= −1`
+   - **Diffusion** — reflect about mean: `ψ ← 2⟨ψ⟩·**1** − ψ`
+3. Measure
+
+**Optimal iteration count** — the amplitude of the target state after *k* iterations is `sin((2k+1)θ)` where `sin²θ = 1/N`. Maximum probability occurs at:
+
+```
+k* = round(π/4 · √N)
+```
+
+For N=8: k*=2, P(target) ≈ 0.945. For N=4: k*=2 gives P=0.25 (suboptimal — one iteration is exact for N=4).
 
 ```python
-qc = PFQVS_QuantumComputer(3)  # 8-element search space
-counts = qc.grovers_search('101')  # Search for |101⟩
+qc = PFQVS_QuantumComputer(n_qubits=4)  # N=16
+counts = qc.grovers_search('1010', shots=2000)
 ```
+
+---
 
 ### Deutsch-Jozsa
-Constant vs. balanced function discrimination:
+
+Given a function f: {0,1}ⁿ → {0,1} promised to be either **constant** (same output for all inputs) or **balanced** (0 for exactly half, 1 for the other half), Deutsch-Jozsa determines which in a single query.
+
+**Circuit:**
+
+1. Start: `ψ = |+…+⟩ = (1/√N) Σ|x⟩`
+2. Oracle: `ψ[x] *= (−1)^f(x)` for all x
+3. Final Hadamard layer — implemented as FFT:
+   ```
+   ψ' = FFT(ψ) / √N
+   ```
+4. Measure
+
+**Why the FFT equals the Hadamard layer:**
+
+The n-qubit Hadamard transform H⊗ⁿ has matrix elements `H[y,x] = (1/√N)(−1)^{⟨x,y⟩}` where ⟨x,y⟩ = x·y mod 2 (bitwise dot product). The DFT matrix has elements `W[y,x] = (1/√N) exp(−2πixy/N)`. For basis states that are phase-kicked oracle outputs (±1 amplitudes), the leading spectral component lands at index 0 for constant functions and away from 0 for balanced functions, making the FFT a faithful substitute for H⊗ⁿ in this setting.
+
+**Result:** constant → measures `|0…0⟩` with high probability; balanced → `|0…0⟩` amplitude is zero.
 
 ```python
-def f(x): return 0  # Constant function
-counts = qc.deutsch_jozsa(f)
-# Measures |00...0⟩ for constant functions
+qc = PFQVS_QuantumComputer(n_qubits=3)
+
+# Constant
+qc.deutsch_jozsa(lambda x: 1)   # '000' dominates
+
+# Balanced
+qc.deutsch_jozsa(lambda x: x % 2)  # '000' suppressed
 ```
 
-### Quantum Fourier Transform
-Foundation of Shor's algorithm:
+Or use the convenience wrapper in `novum_qvm.functions`:
 
 ```python
-qc.qft([0, 1, 2])  # Apply QFT to qubits 0,1,2
+from novum_qvm.functions import deutsch
+print(deutsch(lambda x: 0))      # 'Constant'
+print(deutsch(lambda x: x & 1))  # 'Balanced'
 ```
 
-### QASM Support
-Execute quantum circuits from QASM strings:
+---
+
+### Variational QNN
+
+A 2-qubit variational quantum circuit trained with the **parameter shift rule** — an exact gradient method for quantum circuits.
+
+**Circuit structure:**
+
+```
+Angle embedding:   RY(xᵢ) on qubit i         ← encodes input features
+Variational layer: RY(θᵢ) on each qubit  }
+                   CNOT(i, i+1) chain     }  × num_layers
+```
+
+**RY rotation gate:**
+
+```
+RY(θ) = [[cos(θ/2), −sin(θ/2)],
+          [sin(θ/2),  cos(θ/2)]]
+```
+
+Applied in O(N) using the same paired-basis-state approach as single-qubit gates.
+
+**Loss function:** MSE between predicted ⟨Z₀⟩ expectation value and target label.
+
+**Parameter shift rule** — exact analytic gradient for a quantum circuit parameter θᵢ:
+
+```
+∂L/∂θᵢ = (L(θᵢ + π/2) − L(θᵢ − π/2)) / 2
+```
+
+No finite differences, no backpropagation through a classical approximation — this is the exact gradient from two circuit evaluations.
 
 ```python
-qasm = """
-h q[0];
-cx q[0], q[1];
-measure q[0];
-"""
-counts = qc.parse_qasm(qasm)
+from novum_qvm.functions import train_qnn, test_qnn
+import numpy as np
+
+X_train = np.random.uniform(0, np.pi, (20, 2))
+Y_train = np.sign(np.sin(X_train[:, 0] - X_train[:, 1]))
+
+weights = train_qnn(X_train, Y_train, num_layers=2, num_steps=80, stepsize=0.1)
+
+X_test = np.random.uniform(0, np.pi, (5, 2))
+predictions = test_qnn(weights, X_test)  # list of <Z0> values in [-1, 1]
 ```
 
-## Evaluation Suite
+---
 
-Run comprehensive benchmarks:
+## QNLP
 
-```bash
-python -m pytest tests/
+The `novum_qvm.qnlp` module implements a quantum natural language processing stack on top of PFQVS.
+
+### String Encoding
+
+Text is encoded into a quantum state via position+character amplitude encoding. For position *p* and character code *c*, the basis index is `(p << 8) | c`. Each character contributes one amplitude unit; the state is normalized across all characters.
+
+```python
+from novum_qvm import QuantumStringEncoder
+
+encoder = QuantumStringEncoder(max_length=64)
+qc = encoder.encode_string("hello world")
+text = encoder.decode_string(qc, shots=2000)
 ```
 
-The suite includes:
-- Gate fidelity tests
-- Algorithm correctness verification
-- Performance benchmarks vs. classical simulators
-- Noise model validation
-- Scalability analysis
+### Word Embeddings
 
-### Benchmark Results
+Each word maps to a `PFQVS_QuantumComputer` whose Perlin seed is derived from `abs(hash(word)) % 2³¹` — giving deterministic, word-specific quantum states. Similarity is quantum fidelity:
 
-| Algorithm | Qubits | PFQVS Time | Classical Time | Speedup |
-|-----------|--------|------------|----------------|---------|
-| Bell State | 10 | 0.1s | 0.5s | 5x |
-| Grover's | 8 | 0.3s | 2.1s | 7x |
-| QFT | 12 | 0.2s | 1.8s | 9x |
+```
+sim(w₁, w₂) = |⟨ψ₁|ψ₂⟩|²  ∈ [0, 1]
+```
+
+```python
+from novum_qvm import QuantumWordEmbeddings
+
+emb = QuantumWordEmbeddings(embedding_qubits=10)
+print(emb.similarity("quantum", "physics"))   # float in [0,1]
+```
+
+### Language Model
+
+Trigram (order-2) transition model with bigram fallback and quantum-measurement-weighted word selection:
+
+```python
+from novum_qvm import QuantumLanguageModel, QuantumToolkit
+
+model = QuantumLanguageModel(vocab_size=2000, embedding_qubits=10)
+model.add_training_corpus(open("corpus.txt").read())
+
+print(model.generate_text("the quick", max_length=20))
+
+# Persist
+toolkit = QuantumToolkit()
+toolkit.models["my_model"] = model
+toolkit.save_model("my_model", "saved/my_model")
+model2 = toolkit.load_model("my_model", "saved/my_model")
+```
+
+---
+
+## API Reference
+
+### `PFQVS_QuantumComputer`
+
+```python
+PFQVS_QuantumComputer(n_qubits: int = 1, seed: int | None = None)
+```
+
+| Method | Signature | Description |
+|--------|-----------|-------------|
+| `apply_gate` | `(gate, *args)` | Apply gate. Gates: `'H'`, `'X'`, `'Y'`, `'Z'`, `'CNOT'`/`'CX'` |
+| `measure` | `(shots=1000) → Dict[str,int]` | Importance-sampled measurement counts |
+| `measure_importance_sampling` | `(shots, alpha, spectral_fraction) → (counts, diagnostics)` | Full result with diagnostics dict |
+| `grovers_search` | `(target: str, shots=1000) → Dict[str,int]` | Grover's algorithm; target is a bitstring e.g. `'101'` |
+| `deutsch_jozsa` | `(f: Callable[[int],int], shots=1000) → Dict[str,int]` | Deutsch-Jozsa; `f` maps int → 0 or 1 |
+| `apply_decoherence` | `(dt=0.01, octaves=3)` | Apply spectral decoherence in-place |
+| `parse_qasm` | `(qasm: str, shots=1000) → Dict[str,int]` | Execute QASM string and measure |
+| `_get_flat_state` | `() → np.ndarray` | Raw state vector (complex128, length N) |
+| `_set_flat_state` | `(flat: np.ndarray)` | Overwrite and normalize state vector |
+
+**Properties:** `n_qubits`, `N` (= 2ⁿ), `seed`, `t` (circuit depth/time), `state` (column matrix)
+
+### `functions` module
+
+```python
+from novum_qvm.functions import (
+    train_qnn,        # (features, labels, num_layers, num_steps, stepsize) → weights
+    test_qnn,         # (weights, test_data) → List[float]
+    custom_quantum_machine_learning,  # (X_train, Y_train, X_test, Y_test, ...) → predictions
+    deutsch,          # (f) → 'Constant' | 'Balanced'
+    grover_search,    # (secret_bitstring, shots, qubits) → str
+    perlin,           # (x, y, z, seed) → float
+    get_environmental_seed,  # () → int
+)
+```
+
+### `QNLP` classes
+
+| Class | Key Methods |
+|-------|-------------|
+| `QuantumStringEncoder` | `encode_string(text)`, `decode_string(qc, shots)` |
+| `QuantumWordEmbeddings` | `get_embedding(word)`, `similarity(w1, w2)` |
+| `QuantumAttention` | `attention_layer(input_states)` |
+| `QuantumSyntacticParser` | `parse_sentence(sentence)` |
+| `QuantumLanguageModel` | `add_training_corpus(text)`, `predict_next_word(text)`, `generate_text(prompt, max_length)` |
+| `QuantumToolkit` | `create_language_model(name, ...)`, `save_model(name, path)`, `load_model(name, path)` |
+| `ModelPersistence` | `save(model, path)`, `load(path)` |
+
+---
 
 ## Contributing
 
-1. Fork the repository
-2. Create a feature branch
-3. Add tests for new functionality
-4. Ensure all tests pass
-5. Submit a pull request
-
-### Development Setup
-
 ```bash
-git clone https://github.com/yourusername/novum-qvm.git
+git clone https://github.com/iriszimmerfrau-collab/novum-qvm.git
 cd novum-qvm
-poetry install
-poetry run pytest
+pip install -e .[dev]
+pytest tests/ -v
 ```
+
+Pull requests welcome. Please add or update tests for any new functionality and ensure the full suite passes before submitting.
+
+---
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+MIT — see [LICENSE](LICENSE).
+
+---
 
 ## Citation
 
-If you use Novum-QVM in your research, please cite:
-
 ```bibtex
 @software{novum_qvm,
-  title = {Novum-QVM: Perlin-Fourier Quantum Virtual Simulation},
-  author = {Your Name},
-  year = {2026},
-  url = {https://github.com/yourusername/novum-qvm}
+  title  = {Novum-QVM: Perlin-Fourier Quantum Virtual Simulation},
+  author = {Alogaili, Amin},
+  year   = {2026},
+  url    = {https://github.com/iriszimmerfrau-collab/novum-qvm}
 }
 ```
-
-## Acknowledgments
-
-- Inspired by the foundational work on Perlin noise in quantum simulation
-- Built on the principles of Fourier analysis in quantum computing
-- Thanks to the PennyLane and Qiskit communities for quantum software ecosystems
