@@ -10,7 +10,7 @@ readme = "README.md"
 requires-python = ">=3.8"
 license = {file = "LICENSE"}
 authors = [
-    {name = "Amin Alogaili", email = "aminalogai@aol.com"}
+    {name = "Iris Zimmerfrau"}
 ]
 keywords = ["quantum", "computing", "simulation", "PFQVS", "QNLP", "quantum-machine-learning"]
 classifiers = [

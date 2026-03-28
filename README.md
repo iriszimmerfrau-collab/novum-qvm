@@ -439,7 +439,7 @@ MIT — see [LICENSE](LICENSE).
 ```bibtex
 @software{novum_qvm,
   title  = {Novum-QVM: Perlin-Fourier Quantum Virtual Simulation},
-  author = {Alogaili, Amin},
+  author = {Zimmerfrau, Iris},
   year   = {2026},
   url    = {https://github.com/iriszimmerfrau-collab/novum-qvm}
 }
