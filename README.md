@@ -53,8 +53,11 @@ pytest tests/
 ```python
 from novum_qvm import PFQVS_QuantumComputer
 
-# 2-qubit simulator — state initialized with Perlin noise
+# 2-qubit simulator — starts from Perlin-noise state, not |00⟩
+# Reset to |00⟩ explicitly before circuits that depend on a clean start
+import numpy as np
 qc = PFQVS_QuantumComputer(n_qubits=2)
+qc._set_flat_state(np.array([1, 0, 0, 0], dtype=complex))
 
 # Apply gates
 qc.apply_gate('H', 0)        # Hadamard on qubit 0
@@ -62,7 +65,8 @@ qc.apply_gate('CNOT', 0, 1)  # CNOT, control=0, target=1
 
 # Measure (importance-sampled)
 counts = qc.measure(shots=1000)
-print(counts)  # {'00': ~480, '11': ~520}
+# Bell state: '00' and '11' dominate; exact split varies due to importance sampling
+print(counts)
 
 # Grover's search over 3 qubits
 qc3 = PFQVS_QuantumComputer(n_qubits=3)
@@ -207,7 +211,9 @@ Grover's algorithm finds a marked element in an unsorted database of N items in 
 k* = round(π/4 · √N)
 ```
 
-For N=8: k*=2, P(target) ≈ 0.945. For N=4: k*=2 gives P=0.25 (suboptimal — one iteration is exact for N=4).
+For N=4: sinθ = 1/2, θ = π/6. k=1 gives P = sin²(3·π/6) = sin²(π/2) = **1.0** — one iteration finds the target with certainty. The formula `round(π/4·√4)` = `round(1.57)` = 2 in Python, so the implementation uses k=2 for N=4, which gives P = sin²(5π/6) = 0.25 — a known limitation of using `round` versus `floor` for small N.
+
+For N=8: k*=2, P(target) ≈ 0.945. For N≥16 the rounding error is negligible.
 
 ```python
 qc = PFQVS_QuantumComputer(n_qubits=4)  # N=16
@@ -230,9 +236,11 @@ Given a function f: {0,1}ⁿ → {0,1} promised to be either **constant** (same 
    ```
 4. Measure
 
-**Why the FFT equals the Hadamard layer:**
+**Why the FFT identifies constant vs. balanced in this setting:**
 
-The n-qubit Hadamard transform H⊗ⁿ has matrix elements `H[y,x] = (1/√N)(−1)^{⟨x,y⟩}` where ⟨x,y⟩ = x·y mod 2 (bitwise dot product). The DFT matrix has elements `W[y,x] = (1/√N) exp(−2πixy/N)`. For basis states that are phase-kicked oracle outputs (±1 amplitudes), the leading spectral component lands at index 0 for constant functions and away from 0 for balanced functions, making the FFT a faithful substitute for H⊗ⁿ in this setting.
+The n-qubit Hadamard transform H⊗ⁿ has matrix elements `H[y,x] = (1/√N)(−1)^{⟨x,y⟩}` where ⟨x,y⟩ = x·y mod 2 (bitwise dot product). The DFT matrix has elements `W[y,x] = (1/√N) exp(−2πixy/N)`. These are not the same transform — H⊗ⁿ uses real ±1 entries while DFT uses complex roots of unity, and they agree only for n=1.
+
+However, for the specific ±1 phase vectors produced by a Deutsch-Jozsa oracle, the DFT produces the correct classification: a constant oracle gives a flat ±1 vector whose FFT concentrates at index 0, and a balanced oracle (equal numbers of +1 and −1) gives a vector with zero DC component, suppressing index 0. This is not a general equivalence between FFT and H⊗ⁿ — it exploits the particular structure of Deutsch-Jozsa oracle outputs. For arbitrary quantum circuits, H⊗ⁿ must be applied explicitly.
 
 **Result:** constant → measures `|0…0⟩` with high probability; balanced → `|0…0⟩` amplitude is zero.
 
@@ -320,22 +328,25 @@ text = encoder.decode_string(qc, shots=2000)
 
 ### Word Embeddings
 
-Each word maps to a `PFQVS_QuantumComputer` whose Perlin seed is derived from `abs(hash(word)) % 2³¹` — giving deterministic, word-specific quantum states. Similarity is quantum fidelity:
+Each word maps to a `PFQVS_QuantumComputer` whose Perlin seed is derived from `abs(hash(word)) % 2³¹`. Because the Perlin initialization is seeded, the same word always produces the same state (self-similarity = 1.0), and structurally different seeds produce structurally different Perlin states — so fidelity between distinct words is generally small but nonzero, not trivially high for all pairs. Similarity is quantum fidelity:
 
 ```
 sim(w₁, w₂) = |⟨ψ₁|ψ₂⟩|²  ∈ [0, 1]
 ```
+
+This gives a deterministic, hash-driven metric on the word embedding space. It is not learned from a corpus — it is a fixed structural property of the Perlin initialization function applied to word hashes.
 
 ```python
 from novum_qvm import QuantumWordEmbeddings
 
 emb = QuantumWordEmbeddings(embedding_qubits=10)
 print(emb.similarity("quantum", "physics"))   # float in [0,1]
+print(emb.similarity("quantum", "quantum"))   # 1.0
 ```
 
 ### Language Model
 
-Trigram (order-2) transition model with bigram fallback and quantum-measurement-weighted word selection:
+Trigram (order-2) transition model with bigram fallback. Prediction is driven by the classical n-gram table trained on the corpus; PFQVS contributes a vocabulary-indexed sampling distribution from the word embedding of the last token, which is blended with the transition candidates to introduce structured stochasticity. The language model structure is classical — the quantum component acts as a seeded, embedding-aware random sampler over the candidate set, not as a generative model in its own right.
 
 ```python
 from novum_qvm import QuantumLanguageModel, QuantumToolkit
