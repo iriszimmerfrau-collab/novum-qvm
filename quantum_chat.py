@@ -51,7 +51,14 @@ def load_human_chat_dataset(num_examples=None):
         dataset = dataset.select(range(min(num_examples, len(dataset))))
     print(f"  ✓ human_chat.txt: {len(dataset)} examples")
     return dataset
-
+def load_gpt5_chat_dataset(num_examples=None):
+    """Load GPT-5 chat dataset - load ALL examples if num_examples is None."""
+    print("Loading GPT-5 chat dataset...")
+    dataset = load_dataset("ytz20/LMSYS-Chat-GPT-5-Chat-Response", split="train")
+    if num_examples is not None:
+        dataset = dataset.select(range(min(num_examples, len(dataset))))
+    print(f"  ✓ GPT-5 chat: {len(dataset)} examples")
+    return dataset
 
 def extract_puffin_text(dataset):
     """Extract conversation text from Puffin dataset."""
