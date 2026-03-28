@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pip install:*)",
+      "Bash(python -m pip install qiskit qiskit-aer)",
+      "Bash(python -m pip install qiskit qiskit-aer --no-warn-script-location)",
+      "Bash(python -c \"import qiskit; print\\(''qiskit'', qiskit.__version__\\)\")"
+    ]
+  }
+}
