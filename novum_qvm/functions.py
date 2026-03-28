@@ -3,6 +3,9 @@ import random
 import math
 import time
 import hashlib
+import pennylane as qml
+from qiskit import QuantumCircuit, QuantumRegister, ClassicalRegister, Aer, assemble, execute
+from sklearn.preprocessing import StandardScaler
 
 # Perlin noise implementation
 def fade(t):
@@ -194,7 +197,7 @@ def grover_search(secret_bitstring, shots=10000, qubits=128):
     if count > max_count:
       max_count = count
       found_bitstring = bitstring
-  if (found_bitstring, secret_bitstring):
+  if found_bitstring == secret_bitstring:
     found_bitstring = secret_bitstring
     return found_bitstring
   else:
