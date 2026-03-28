@@ -3,9 +3,10 @@ import random
 import math
 import time
 import hashlib
-from typing import Callable, List
+from typing import TYPE_CHECKING, Callable, List
 
-from .QuantumComputer import PFQVS_QuantumComputer
+if TYPE_CHECKING:
+    from .QuantumComputer import PFQVS_QuantumComputer
 
 
 # Perlin noise implementation
@@ -67,7 +68,7 @@ def perlin(x, y, z, seed=None):
     return perlin_noise(x, y, z, seed)
 
 
-def _apply_ry(qc: PFQVS_QuantumComputer, theta: float, target: int):
+def _apply_ry(qc: "PFQVS_QuantumComputer", theta: float, target: int):
     """Apply RY(theta) rotation to target qubit in-place using state vector pairs."""
     flat = qc._get_flat_state().copy()
     cos_t = math.cos(theta / 2.0)
@@ -84,6 +85,7 @@ def _apply_ry(qc: PFQVS_QuantumComputer, theta: float, target: int):
 
 def _qnn_circuit(weights: np.ndarray, x: np.ndarray, n_qubits: int = 2, num_layers: int = 2) -> float:
     """Variational QNN circuit: angle embedding + entangling layers. Returns <Z0>."""
+    from .QuantumComputer import PFQVS_QuantumComputer
     qc = PFQVS_QuantumComputer(n_qubits=n_qubits)
     psi = np.zeros(qc.N, dtype=complex)
     psi[0] = 1.0
@@ -149,6 +151,7 @@ def test_qnn(weights: np.ndarray, test_data) -> List[float]:
 
 def deutsch(f: Callable[[int], int]) -> str:
     """Determine if f: {0,1} -> {0,1} is constant or balanced via Deutsch-Jozsa."""
+    from .QuantumComputer import PFQVS_QuantumComputer
     qc = PFQVS_QuantumComputer(n_qubits=1)
     counts = qc.deutsch_jozsa(f)
     return "Constant" if counts.get('0', 0) >= counts.get('1', 0) else "Balanced"
@@ -176,6 +179,7 @@ def find_substring(string, substring):
 
 def grover_search(secret_bitstring: str, shots: int = 10000, qubits: int = 128) -> str:
     """Search for secret_bitstring using Grover's algorithm via PFQVS_QuantumComputer."""
+    from .QuantumComputer import PFQVS_QuantumComputer
     qc = PFQVS_QuantumComputer(n_qubits=qubits)
     counts = qc.grovers_search(secret_bitstring, shots=shots)
     found = max(counts, key=counts.get)
