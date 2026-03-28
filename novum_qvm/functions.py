@@ -152,10 +152,10 @@ def custom_quantum_machine_learning(X_train, Y_train, X_test, Y_test, num_qubits
     X_test = scaler.transform(X_test)
 
     # Train the quantum model
-    params = train(X_train, Y_train, num_qubits, num_layers, num_steps)
+    params = train_qnn(X_train, Y_train, num_layers, num_steps)
 
     # Test the quantum model
-    accuracy = test(X_test, Y_test, params, num_qubits)
+    accuracy = test_qnn(params, X_test)
     return accuracy
 def find_substring(string, substring):
     if substring in string:
