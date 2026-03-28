@@ -27,10 +27,6 @@ setup(
     python_requires=">=3.8",
     install_requires=[
         "numpy>=1.22.0",
-        "pennylane>=0.25.0",
-        "qiskit>=0.39.0",
-        "qiskit-aer>=0.11.0",
-        "scikit-learn>=1.0.0",
     ],
     extras_require={
         "qnlp": [
